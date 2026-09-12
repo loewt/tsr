@@ -42,6 +42,26 @@ cd tsr
 uv sync --extra test
 ```
 
+### Geometric algebra dependency
+
+The rigid-transform math (composition, inversion, and the rotation angle behind
+the geodesic metrics) runs on [gafro](https://github.com/ga-robotics-research/gafro),
+which represents poses as conformal-geometric-algebra motors instead of 4x4
+matrices. Motors are closed under composition, so chained transforms cannot drift
+off SE(3), inversion is an exact reversion rather than a matrix solve, and the
+rotation angle is read off the motor logarithm instead of an ill-conditioned
+`arccos` of the trace.
+
+gafro is **required**, and is not published on PyPI — build and install the
+bindings from its source tree *before* installing `tsr`:
+
+```bash
+pip install /path/to/gafro/bindings/python
+```
+
+Poses cross the API as plain 4x4 numpy arrays; `Motor` is used internally and
+does not appear in any public signature.
+
 ## Quick Start
 
 ### Load templates for a full manipulation task

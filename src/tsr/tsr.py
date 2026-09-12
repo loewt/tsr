@@ -1,10 +1,9 @@
 # SPDX-License-Identifier: BSD-2-Clause
 # Authors: Siddhartha Srinivasa and contributors to TSR
 
-from functools import reduce
-
 import numpy
 import numpy.random
+from gafro import Motor
 from numpy import pi
 
 from .utils import EPSILON, geodesic_distance, wrap_to_interval
@@ -253,8 +252,26 @@ class TSR:
                 f"xyzrpy violates bounds at dimensions {violated}: xyzrpy={xyzrpy}, bounds={self._Bw_cont[violated]}"
             )
         Tw = TSR.xyzrpy_to_trans(xyzrpy)
-        trans = reduce(numpy.dot, [self.T0_w, Tw, self.Tw_e])
-        return trans
+        motor = Motor.from_matrix(self.T0_w) * Motor.from_matrix(Tw) * Motor.from_matrix(self.Tw_e)
+        return motor.to_transformation_matrix()
+
+    def _to_tsr_frame(self, trans):
+        """
+        Express an end-effector transform in the TSR's w frame.
+
+        Implements Equations 5 and 6 of Berenson et al. 2011 as a single
+        motor product:
+
+            T0_s' = T0_s * (Tw_e)^-1        (Equation 5)
+            Tw_s' = (T0_w)^-1 * T0_s'       (Equation 6)
+
+        @param trans 4x4 transform (T0_s - end-effector pose in world frame)
+        @return Tw_s' 4x4 transform in the w frame
+        """
+        motor = (
+            Motor.from_matrix(self.T0_w).inverse() * Motor.from_matrix(trans) * Motor.from_matrix(self.Tw_e).inverse()
+        )
+        return motor.to_transformation_matrix()
 
     def to_xyzrpy(self, trans):
         """
@@ -262,7 +279,7 @@ class TSR:
         @param  trans  4x4 transform
         @return xyzrpy 6x1 vector of Bw values
         """
-        Tw = reduce(numpy.dot, [numpy.linalg.inv(self.T0_w), trans, numpy.linalg.inv(self.Tw_e)])
+        Tw = self._to_tsr_frame(trans)
         xyz, rot = Tw[0:3, 3], Tw[0:3, 0:3]
         rpycheck, rpy = TSR.rot_within_rpy_bounds(rot, self._Bw_cont)
         if not all(rpycheck):
@@ -303,11 +320,7 @@ class TSR:
         @param  trans 4x4 transform
         @return True if transform is within TSR bounds, False otherwise
         """
-        # Transform to TSR frame (same as _displacement_to_tsr)
-        # Equation 5: T0_s' = T0_s * (Tw_e)^-1
-        T0_s_prime = numpy.dot(trans, numpy.linalg.inv(self.Tw_e))
-        # Equation 6: Tw_s' = (T0_w)^-1 * T0_s'
-        Tw_s_prime = numpy.dot(numpy.linalg.inv(self.T0_w), T0_s_prime)
+        Tw_s_prime = self._to_tsr_frame(trans)
 
         # Extract XYZ and rot components in the TSR frame
         Bw_xyz, Bw_rpy = self._Bw_cont[0:3, :], self._Bw_cont[3:6, :]
@@ -334,11 +347,7 @@ class TSR:
         @return dx 6x1 displacement vector to TSR
         @return dw 6x1 displacement vector in w frame (for computing bwopt)
         """
-        # Equation 5: T0_s' = T0_s * (Tw_e)^-1
-        T0_s_prime = numpy.dot(trans, numpy.linalg.inv(self.Tw_e))
-
-        # Equation 6: Tw_s' = (T0_w)^-1 * T0_s'
-        Tw_s_prime = numpy.dot(numpy.linalg.inv(self.T0_w), T0_s_prime)
+        Tw_s_prime = self._to_tsr_frame(trans)
 
         # Equation 7: Convert to displacement vector [xyz, rpy]
         xyz = Tw_s_prime[0:3, 3]

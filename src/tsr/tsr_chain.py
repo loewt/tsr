@@ -2,9 +2,9 @@
 # Authors: Siddhartha Srinivasa and contributors to TSR
 
 import logging
-from functools import reduce
 
 import numpy
+from gafro import Motor
 
 from .tsr import NANBW, TSR
 from .utils import EPSILON, geodesic_distance
@@ -141,9 +141,10 @@ class TSRChain:
                 )
             xyzrpy_list_clamped.append(xyzrpy_clamped)
 
-        # Compute the chained transform WITHOUT modifying original TSR objects
-        # Start with the first TSR's T0_w
-        T0_w_current = self.TSRs[0].T0_w
+        # Compute the chained transform WITHOUT modifying original TSR objects.
+        # Accumulating motors rather than matrices keeps the running product on
+        # SE(3) exactly, however long the chain.
+        motor = Motor.from_matrix(self.TSRs[0].T0_w)
 
         for idx in range(len(self.TSRs)):
             tsr = self.TSRs[idx]
@@ -152,10 +153,10 @@ class TSRChain:
             # Convert xyzrpy to transform in w frame
             Tw_sample = TSR.xyzrpy_to_trans(xyzrpy)
 
-            # Compute end-effector transform: T0_w_current * Tw_sample * Tw_e
-            T0_w_current = reduce(numpy.dot, [T0_w_current, Tw_sample, tsr.Tw_e])
+            # Compute end-effector transform: motor * Tw_sample * Tw_e
+            motor = motor * Motor.from_matrix(Tw_sample) * Motor.from_matrix(tsr.Tw_e)
 
-        return T0_w_current
+        return motor.to_transformation_matrix()
 
     def sample_xyzrpy(self, xyzrpy_list=None):
         """

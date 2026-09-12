@@ -2,6 +2,7 @@
 # Authors: Siddhartha Srinivasa and contributors to TSR
 
 import numpy as np
+from gafro import Motor
 from numpy import pi
 
 EPSILON = 0.001
@@ -27,8 +28,10 @@ def rotation_angle(R: np.ndarray) -> float:
     """
     Compute the angle of rotation for a rotation matrix.
 
-    The rotation angle θ satisfies: trace(R) = 1 + 2*cos(θ)
-    Therefore: θ = arccos((trace(R) - 1) / 2)
+    Computed from the bivector part of the corresponding gafro motor's
+    logarithm, whose norm is the rotation angle. This matches the classical
+    θ = arccos((trace(R) - 1) / 2) to machine precision, but stays
+    well-conditioned near θ = 0 and θ = π where the cosine is flat.
 
     Args:
         R: 3x3 rotation matrix
@@ -36,13 +39,11 @@ def rotation_angle(R: np.ndarray) -> float:
     Returns:
         angle: rotation angle in radians [0, π]
     """
-    # Compute trace and clamp to valid range for arccos
-    trace = np.trace(R)
-    # trace = 1 + 2*cos(θ), so cos(θ) = (trace - 1) / 2
-    cos_angle = (trace - 1.0) / 2.0
-    # Clamp to [-1, 1] to handle numerical errors
-    cos_angle = np.clip(cos_angle, -1.0, 1.0)
-    return np.arccos(cos_angle)
+    T = np.eye(4)
+    T[0:3, 0:3] = R
+    # The bivector part of the motor log is the rotation vector; its norm is
+    # the angle.
+    return float(np.linalg.norm(Motor.from_matrix(T).log()[0:3]))
 
 
 def geodesic_error(t1: np.ndarray, t2: np.ndarray) -> np.ndarray:
@@ -51,7 +52,7 @@ def geodesic_error(t1: np.ndarray, t2: np.ndarray) -> np.ndarray:
 
     The error is computed as:
     - Translation error: the Euclidean distance between positions
-    - Rotation error: the angle of the relative rotation R1^T * R2
+    - Rotation error: the angle of the relative motor (t1)^-1 * t2
 
     Args:
         t1: first transform (4x4)
@@ -64,11 +65,9 @@ def geodesic_error(t1: np.ndarray, t2: np.ndarray) -> np.ndarray:
     # Translation error (in world frame)
     trans_error = t2[0:3, 3] - t1[0:3, 3]
 
-    # Rotation error: angle of R1^T * R2
-    R1 = t1[0:3, 0:3]
-    R2 = t2[0:3, 0:3]
-    R_rel = np.dot(R1.T, R2)
-    angle_error = rotation_angle(R_rel)
+    # Rotation error: angle of the relative motor (t1)^-1 * t2
+    rel = Motor.from_matrix(t1).inverse() * Motor.from_matrix(t2)
+    angle_error = float(np.linalg.norm(rel.log()[0:3]))
 
     return np.hstack((trans_error, angle_error))
 
